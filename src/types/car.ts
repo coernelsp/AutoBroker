@@ -1,36 +1,42 @@
-export interface CarBrand {
-  id: string;
-  name: string;
-  logo_url?: string;
-  created_at: string;
-}
+export type PriceSource = 'all' | 'mobile_de' | 'ebay';
 
+// One row of the `car_market_overview` view.
 export interface CarModel {
   id: string;
-  brand_id: string;
-  brand?: CarBrand;
+  brand: string;
   name: string;
-  variant?: string;
+  variant: string | null;
   year: number;
   fuel_type: string;
   body_type: string;
-  created_at: string;
-  current_price?: number;
-  price_change?: number;
-  price_change_percent?: number;
+  // Average listing price after outlier removal, null until the first snapshot.
+  current_price: number | null;
+  median_price: number | null;
+  min_price: number | null;
+  max_price: number | null;
+  listing_count: number | null;
+  price_updated_at: string | null;
+  // Average price ~30 days ago, null if tracking started more recently.
+  previous_price: number | null;
+  // Prices of the last 30 days, oldest first.
+  sparkline: number[];
 }
 
-export interface PriceHistory {
-  id: string;
+export interface PriceSnapshot {
   car_model_id: string;
-  price: number;
-  mileage: number;
-  condition: string;
+  source: PriceSource;
+  avg_price: number;
+  median_price: number;
+  min_price: number;
+  max_price: number;
+  listing_count: number;
+  avg_mileage: number | null;
   recorded_at: string;
-  source?: string;
-  created_at: string;
 }
 
-export interface CarModelWithHistory extends CarModel {
-  price_history: PriceHistory[];
+export interface CarDetail {
+  // Combined ('all') snapshots, oldest first.
+  history: PriceSnapshot[];
+  // Latest snapshot per individual source.
+  sources: PriceSnapshot[];
 }

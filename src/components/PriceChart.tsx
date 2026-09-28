@@ -1,127 +1,99 @@
-import { useMemo } from 'react';
-import { PriceHistory } from '../types/car';
+import { PointerEvent, useId, useMemo, useState } from 'react';
 
-interface PriceChartProps {
-  data: PriceHistory[];
+export interface ChartPoint {
+  date: string;
+  price: number;
 }
 
-export function PriceChart({ data }: PriceChartProps) {
-  const chartData = useMemo(() => {
-    if (!data || data.length === 0) return null;
+interface PriceChartProps {
+  points: ChartPoint[];
+  trend: 'up' | 'down';
+  onHoverChange: (index: number | null) => void;
+}
 
-    const sortedData = [...data].sort(
-      (a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime()
-    );
+// Vertical padding (in % of the chart height) so the line never touches the edges.
+const PAD_Y = 8;
 
-    const prices = sortedData.map((d) => d.price);
-    const minPrice = Math.min(...prices);
-    const maxPrice = Math.max(...prices);
-    const priceRange = maxPrice - minPrice;
+// Full-width line chart with scrubbing: moving the pointer across the chart
+// reports the nearest point so the headline price can follow it.
+export function PriceChart({ points, trend, onHoverChange }: PriceChartProps) {
+  const gradientId = useId();
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
-    const points = sortedData.map((point, index) => {
-      const x = (index / (sortedData.length - 1)) * 100;
-      const y = 100 - ((point.price - minPrice) / priceRange) * 100;
-      return { x, y, price: point.price, date: point.recorded_at };
-    });
+  const coords = useMemo(() => {
+    const prices = points.map((p) => p.price);
+    const min = Math.min(...prices);
+    const range = Math.max(...prices) - min || 1;
+    const lastIndex = Math.max(points.length - 1, 1);
+    return points.map((p, i) => ({
+      x: (i / lastIndex) * 100,
+      y: PAD_Y + (1 - (p.price - min) / range) * (100 - 2 * PAD_Y),
+    }));
+  }, [points]);
 
-    const pathD = points
-      .map((point, index) => {
-        if (index === 0) {
-          return `M ${point.x} ${point.y}`;
-        }
-        return `L ${point.x} ${point.y}`;
-      })
-      .join(' ');
+  if (coords.length < 2) return null;
 
-    const gradientPathD = `${pathD} L 100 100 L 0 100 Z`;
+  const line = coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x} ${c.y}`).join(' ');
+  const area = `${line} L 100 100 L 0 100 Z`;
+  const baselineY = coords[0].y;
+  const active = hoverIndex != null ? coords[hoverIndex] : null;
 
-    return { points, pathD, gradientPathD, sortedData, minPrice, maxPrice };
-  }, [data]);
+  const updateHover = (index: number | null) => {
+    setHoverIndex(index);
+    onHoverChange(index);
+  };
 
-  if (!chartData) {
-    return (
-      <div className="flex items-center justify-center h-64 text-gray-500">
-        Keine Daten verfügbar
-      </div>
-    );
-  }
-
-  const { points, pathD, gradientPathD, sortedData, minPrice, maxPrice } = chartData;
+  const handlePointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ratio = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
+    updateHover(Math.round(ratio * (coords.length - 1)));
+  };
 
   return (
-    <div className="space-y-4">
-      <div className="relative w-full h-64 bg-gradient-to-br from-blue-50 to-white rounded-lg p-6 border border-gray-200">
-        <svg
-          viewBox="0 0 100 100"
-          className="w-full h-full"
-          preserveAspectRatio="none"
-        >
-          <defs>
-            <linearGradient id="priceGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.3" />
-              <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.05" />
-            </linearGradient>
-          </defs>
+    <div
+      className={`relative h-64 sm:h-80 touch-pan-y select-none ${trend === 'up' ? 'text-up' : 'text-down'}`}
+      onPointerMove={handlePointerMove}
+      onPointerDown={handlePointerMove}
+      onPointerLeave={() => updateHover(null)}
+    >
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full overflow-visible" aria-hidden="true">
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="currentColor" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <line
+          x1="0"
+          x2="100"
+          y1={baselineY}
+          y2={baselineY}
+          className="stroke-muted/50"
+          strokeWidth="1"
+          strokeDasharray="2 4"
+          vectorEffect="non-scaling-stroke"
+        />
+        <path d={area} fill={`url(#${gradientId})`} />
+        <path
+          d={line}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
 
-          <path d={gradientPathD} fill="url(#priceGradient)" />
-
-          <path
-            d={pathD}
-            fill="none"
-            stroke="#3b82f6"
-            strokeWidth="0.5"
-            vectorEffect="non-scaling-stroke"
-          />
-
-          {points.map((point, index) => (
-            <g key={index}>
-              <circle
-                cx={point.x}
-                cy={point.y}
-                r="1"
-                fill="#3b82f6"
-                className="hover:r-2 transition-all cursor-pointer"
-              />
-            </g>
-          ))}
-        </svg>
-
-        <div className="absolute top-4 left-4 bg-white px-3 py-1.5 rounded-lg shadow-sm border border-gray-200">
-          <p className="text-xs text-gray-500">Max</p>
-          <p className="text-sm font-bold text-gray-900">
-            {maxPrice.toLocaleString('de-DE')} €
-          </p>
-        </div>
-
-        <div className="absolute bottom-4 left-4 bg-white px-3 py-1.5 rounded-lg shadow-sm border border-gray-200">
-          <p className="text-xs text-gray-500">Min</p>
-          <p className="text-sm font-bold text-gray-900">
-            {minPrice.toLocaleString('de-DE')} €
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {sortedData.slice(-4).map((point, index) => (
+      {active && (
+        <>
+          <div className="pointer-events-none absolute inset-y-0 w-px bg-muted/40" style={{ left: `${active.x}%` }} />
           <div
-            key={index}
-            className="bg-white border border-gray-200 rounded-lg p-3 hover:border-blue-300 transition-colors"
-          >
-            <p className="text-xs text-gray-500 mb-1">
-              {new Date(point.recorded_at).toLocaleDateString('de-DE', {
-                month: 'short',
-                year: 'numeric',
-              })}
-            </p>
-            <p className="text-sm font-bold text-gray-900">
-              {point.price.toLocaleString('de-DE')} €
-            </p>
-            <p className="text-xs text-gray-600 mt-1">
-              {point.mileage.toLocaleString('de-DE')} km
-            </p>
-          </div>
-        ))}
-      </div>
+            className="pointer-events-none absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current ring-4 ring-bg"
+            style={{ left: `${active.x}%`, top: `${active.y}%` }}
+          />
+        </>
+      )}
     </div>
   );
 }
